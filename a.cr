@@ -8,11 +8,10 @@ D64_FRACT_MASK   = 0x000FFFFFFFFFFFFF_u64 # aka significand
 D64_IMPLICIT_ONE = 0x0010000000000000_u64 # hiden bit
 D64_EXP_POS      =                     52
 D64_EXP_BIAS     =                   1075
-D_1_LOG2_10      =    0.30102999566398114 # 1 / lg(10)
 MASK32           =         0xFFFFFFFF_u32
 
 PHYSICAL_SIGNIFICAND_SIZE = 52 # Excludes the hidden bit
-SIGNIFICAND_SIZE          = 53
+SIGNIFICAND_SIZE          = 53 # float64
 EXPONENT_BIAS             = 0x7F + PHYSICAL_SIGNIFICAND_SIZE
 DENORMAL_EXPONENT         = -EXPONENT_BIAS + 1
 
@@ -35,9 +34,11 @@ def max(a, b)
   a >= b ? a : b
 end
 
-CACHED_POWER_OFFSET =  348
+CACHED_POWER_OFFSET =  348 # -1 * the first decimal_exp
+CACHED_EXP_STEP     =    8 # decimal exponent distance
 MIN_CACHED_EXP      = -348
-CACHED_EXP_STEP     =    8
+MAX_CACHED_EXP      = 340
+D_1_LOG2_10         =    0.30102999566398114 # 1 / lg(10)
 
 # Do it yourself Floating Point
 # Does not support special NaN and Infinity
@@ -92,7 +93,7 @@ struct DiyFP
 
   # Normalize such that the most signficiant bit of frac is set
   def normalize
-    raise "no" unless frac != 0
+    raise "frac!=0" unless frac != 0
     f = frac
     e = exp
 
@@ -103,8 +104,28 @@ struct DiyFP
     end
 
     # do the final shifts in one go
-    f <<= 11 # DiyFP::SIGNIFICAND_SIZE - ::SIGNIFICAND_SIZE
-    e -= 11
+    f <<=  DiyFP::SIGNIFICAND_SIZE - 53 # f64 significand size
+    e -= DiyFP::SIGNIFICAND_SIZE - 53
+    DiyFP.new(f, e)
+  end
+
+  def normalize_for_boundary
+    raise "frac!=0" unless frac != 0
+    f = frac
+    e = exp
+
+    # This method is mainly called for normalizing boundaries. In general
+    # boundaries need to be shifted by 10 bits. We thus optimize for this case.
+    k10MSBits = 0xFFC0000000000000_u64
+    kUint64MSB = 0x8000000000000000_u64
+    while (f & k10MSBits) == 0
+      f <<= 10;
+      e -= 10;
+    end
+    while (f & kUint64MSB) == 0
+      f <<= 1;
+      e =- 1;
+    end
     DiyFP.new(f, e)
   end
 
@@ -217,14 +238,6 @@ PowCache = [
   {0xaf87023b9bf0ee6b_u64, 1066_i16, 340_i16},
 ].map { |t| Power.new t[0], t[1], t[2] }
 
-def cached_pow(exp : Int, p : DiyFP)
-  k = ((exp + DIYFP_FRACT_SIZE - 1) * D_1_LOG2_10).ceil.to_i
-  i = ((k - MIN_CACHED_EXP - 1) / CACHED_EXP_STEP + 1).to_i
-  p.fract = pow_cache[i].fract
-  p.exp = pow_cache[i].b_exp
-  pow_cache[i].d_exp
-end
-
 Pow10Cache = {0, 1, 10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000, 1000000000}
 
 def largest_pow10(n, n_bits)
@@ -238,13 +251,15 @@ def largest_pow10(n, n_bits)
   return Pow10Cache[guess], guess
 end
 
-def get_cached_power_for_binary_exponent(exp)
+def get_cached_power_for_binary_exponent(exp) : {DiyFP, Int32}
   min_exp = MIN_TARGET_EXP - (exp + DiyFP::SIGNIFICAND_SIZE)
   max_exp = MAX_TARGET_EXP - (exp + DiyFP::SIGNIFICAND_SIZE)
   k = ((min_exp + DiyFP::SIGNIFICAND_SIZE - 1) * D_1_LOG2_10).ceil
-  index = ((CACHED_POWER_OFFSET + k - 1) / CACHED_EXP_STEP + 1).to_i
+  index = ((CACHED_POWER_OFFSET + k.to_i - 1) / CACHED_EXP_STEP) + 1
   pow = PowCache[index]
-  return DiyFP.new(pow.significand, pow.binary_exp), pow.decimal_exp
+  raise "min_exp wrong" unless min_exp <= pow.binary_exp
+  raise "max_exp wrong" unless pow.binary_exp <= max_exp
+  return DiyFP.new(pow.significand, pow.binary_exp), pow.decimal_exp.to_i
 end
 
 # Adjusts the last digit of the generated number, and screens out generated
@@ -505,7 +520,7 @@ end
 def normalized_boundaries(v : Float64)
   raise "not pos" unless v > 0
   w = DiyFP.from_f64(v)
-  m_plus = DiyFP.new((w.frac << 1) + 1, w.exp - 1).normalize
+  m_plus = DiyFP.new((w.frac << 1) + 1, w.exp - 1).normalize_for_boundary
 
   u64 = (pointerof(v).as UInt64*).value
 
@@ -525,7 +540,7 @@ def normalized_boundaries(v : Float64)
            {(w.frac << 1) - 1, w.exp - 1}
          end
   m_minus = DiyFP.new(f << (e - m_plus.exp), m_plus.exp)
-  return {m_minus, m_plus, w}
+  return {minus: m_minus, plus: m_plus}
 end
 
 # Provides a decimal representation of v.
@@ -541,12 +556,14 @@ end
 # computed.
 def grisu3(v : Float64, buffer) : {Bool, Int32}
   length = buffer.size
+  w = DiyFP.from_f64(v).normalize
 
   # boundary_minus and boundary_plus are the boundaries between v and its
   # closest floating-point neighbors. Any number strictly between
   # boundary_minus and boundary_plus will round to v when convert to a double.
   # Grisu3 will never output representations that lie exactly on a boundary.
-  boundary_minus, boundary_plus, w = normalized_boundaries(v)
+  boundaries = normalized_boundaries(v)
+  raise "boundry_plus wrong" unless boundaries[:plus].exp == w.exp
 
   ten_mk, mk = get_cached_power_for_binary_exponent(w.exp)
 
@@ -560,14 +577,15 @@ def grisu3(v : Float64, buffer) : {Bool, Int32}
   # In other words: let f = scaled_w.f() and e = scaled_w.e(), then
   #           (f-1) * 2^e < w*10^k < (f+1) * 2^e
   scaled_w = w * ten_mk
+  raise "scaled_w wrong" unless scaled_w.exp == boundaries[:plus].exp + ten_mk.exp + DiyFP::SIGNIFICAND_SIZE
 
   # In theory it would be possible to avoid some recomputations by computing
   # the difference between w and boundary_minus/plus (a power of 2) and to
   # compute scaled_boundary_minus/plus by subtracting/adding from
   # scaled_w. However the code becomes much less readable and the speed
   # enhancements are not terriffic.
-  scaled_boundary_minus = boundary_minus * ten_mk
-  scaled_boundary_plus = boundary_plus * ten_mk
+  scaled_boundary_minus = boundaries[:minus] * ten_mk
+  scaled_boundary_plus = boundaries[:plus] * ten_mk
 
   # DigitGen will generate the digits of scaled_w. Therefore we have
   # v == (double) (scaled_w * 10^-mk).

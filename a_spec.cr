@@ -112,4 +112,16 @@ describe DiyFP do
     fp.exp.should eq 0x7FE - 0x3FF - 52 - 11
     fp.frac.should eq 0x001fffffffffffff << 11
   end
+
+  it "boundaries" do
+    fp = DiyFP.from_f64(1.5).normalize
+    b = normalized_boundaries(1.5)
+
+    b[:minus].exp.should eq fp.exp
+    b[:plus].exp.should eq fp.exp
+    # 1.5 does not have a significand of the form 2^p (for some p).
+    # Therefore its boundaries are at the same distance.
+    (b[:plus].frac - fp.frac).should eq(fp.frac - b[:minus].frac)
+    (fp.frac - b[:minus].frac).should eq(1 << 10)
+  end
 end
