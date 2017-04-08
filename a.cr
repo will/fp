@@ -91,25 +91,8 @@ struct DiyFP
     self.class.new(f, e)
   end
 
-  # Normalize such that the most signficiant bit of frac is set
+
   def normalize
-    raise "frac!=0" unless frac != 0
-    f = frac
-    e = exp
-
-    # could be a denormal
-    while (f & D64_IMPLICIT_ONE) == 0
-      f <<= 1
-      e -= 1
-    end
-
-    # do the final shifts in one go
-    f <<=  DiyFP::SIGNIFICAND_SIZE - 53 # f64 significand size
-    e -= DiyFP::SIGNIFICAND_SIZE - 53
-    DiyFP.new(f, e)
-  end
-
-  def normalize_for_boundary
     raise "frac!=0" unless frac != 0
     f = frac
     e = exp
@@ -119,12 +102,16 @@ struct DiyFP
     k10MSBits = 0xFFC0000000000000_u64
     kUint64MSB = 0x8000000000000000_u64
     while (f & k10MSBits) == 0
-      f <<= 10;
+     # puts "  sig: #{f}"
+    #  puts "  exp: #{e}"
+      f <<= 10_u64;
       e -= 10;
     end
     while (f & kUint64MSB) == 0
-      f <<= 1;
-      e =- 1;
+     # puts "  sig: #{f}"
+     # puts "  exp: #{e}"
+      f <<= 1_u64;
+      e -= 1;
     end
     DiyFP.new(f, e)
   end
@@ -143,6 +130,24 @@ struct DiyFP
     end
 
     new(frac, exp)
+  end
+
+  # Normalize such that the most signficiant bit of frac is set
+  def self.from_f64_normalized(v : Float64)
+    pre_normalized = from_f64(v)
+    f = pre_normalized.frac
+    e = pre_normalized.exp
+
+    # could be a denormal
+    while (f & D64_IMPLICIT_ONE) == 0
+      f <<= 1
+      e -= 1
+    end
+
+    # do the final shifts in one go
+    f <<=  DiyFP::SIGNIFICAND_SIZE - 53 # f64 significand size
+    e -= DiyFP::SIGNIFICAND_SIZE - 53
+    DiyFP.new(f, e)
   end
 end
 
@@ -520,7 +525,9 @@ end
 def normalized_boundaries(v : Float64)
   raise "not pos" unless v > 0
   w = DiyFP.from_f64(v)
-  m_plus = DiyFP.new((w.frac << 1) + 1, w.exp - 1).normalize_for_boundary
+  #p "inner: #{DiyFP.new((w.frac << 1) + 1, w.exp - 1).inspect}"
+  m_plus =    DiyFP.new((w.frac << 1) + 1, w.exp - 1).normalize
+ # pp m_plus
 
   u64 = (pointerof(v).as UInt64*).value
 
@@ -556,7 +563,7 @@ end
 # computed.
 def grisu3(v : Float64, buffer) : {Bool, Int32}
   length = buffer.size
-  w = DiyFP.from_f64(v).normalize
+  w = DiyFP.from_f64_normalized(v)
 
   # boundary_minus and boundary_plus are the boundaries between v and its
   # closest floating-point neighbors. Any number strictly between

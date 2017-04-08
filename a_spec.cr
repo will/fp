@@ -86,7 +86,7 @@ describe DiyFP do
     ordered = 0x0123456789ABCDEF_u64
     f = pointerof(ordered).as(Float64*).value
 
-    fp = DiyFP.from_f64(f).normalize
+    fp = DiyFP.from_f64_normalized(f)
 
     fp.exp.should eq 0x12 - 0x3FF - 52 - 11
     fp.frac.should eq 0x0013456789ABCDEF_u64 << 11
@@ -96,7 +96,7 @@ describe DiyFP do
     min = 0x0000000000000001_u64
     f = pointerof(min).as(Float64*).value
 
-    fp = DiyFP.from_f64(f).normalize
+    fp = DiyFP.from_f64_normalized(f)
 
     fp.exp.should eq -0x3FF - 52 + 1 - 63
     # This is a denormal; so no hidden bit
@@ -107,21 +107,55 @@ describe DiyFP do
     max = 0x7fefffffffffffff_u64
     f = pointerof(max).as(Float64*).value
 
-    fp = DiyFP.from_f64(f).normalize
+    fp = DiyFP.from_f64_normalized(f)
 
     fp.exp.should eq 0x7FE - 0x3FF - 52 - 11
     fp.frac.should eq 0x001fffffffffffff << 11
   end
+end
 
-  it "boundaries" do
-    fp = DiyFP.from_f64(1.5).normalize
-    b = normalized_boundaries(1.5)
 
-    b[:minus].exp.should eq fp.exp
-    b[:plus].exp.should eq fp.exp
+private def gen_bound(v : UInt64)
+  f = pointerof(v).as(Float64*).value
+  gen_bound(f)
+end
+
+private def gen_bound(v : Float64)
+  a = DiyFP.from_f64(v)
+  fp = DiyFP.from_f64_normalized(v)
+  b = normalized_boundaries(v)
+  b[:minus].exp.should eq fp.exp
+  b[:plus].exp.should eq fp.exp
+
+  return fp.frac, b[:minus].frac, b[:plus].frac
+end
+
+describe "boundaires" do
+  it "boundaries 1.5" do
+    fp, mi, pl = gen_bound(1.5)
+
     # 1.5 does not have a significand of the form 2^p (for some p).
     # Therefore its boundaries are at the same distance.
-    (b[:plus].frac - fp.frac).should eq(fp.frac - b[:minus].frac)
-    (fp.frac - b[:minus].frac).should eq(1 << 10)
+    (pl - fp).should eq(fp - mi)
+    (fp - mi).should eq(1 << 10)
+  end
+
+  it "boundaries 1.0" do
+    fp, mi, pl = gen_bound(1.0)
+
+    # 1.0 does have a significand of the form 2^p (for some p).
+    # Therefore its lower boundary is twice as close as the upper boundary.
+    (pl - fp).should be > fp - mi
+    (fp - mi).should eq 1 << 9
+    (pl - fp).should eq 1 << 10
+  end
+
+  it "boundaries min float64" do
+    fp, mi, pl = gen_bound(0x0000000000000001_u64)
+
+    # min-value does not have a significand of the form 2^p (for some p).
+    # Therefore its boundaries are at the same distance.
+    (pl - fp).should eq fp - mi
+    (fp - mi).should eq 1_u64 << 62
   end
 end
