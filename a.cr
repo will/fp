@@ -4,12 +4,17 @@
 
 D64_SIGN         = 0x8000000000000000_u64
 D64_EXP_MASK     = 0x7FF0000000000000_u64
-D64_FRACT_MASK   = 0x000FFFFFFFFFFFFF_u64
-D64_IMPLICIT_ONE = 0x0010000000000000_u64
+D64_FRACT_MASK   = 0x000FFFFFFFFFFFFF_u64 # aka significand
+D64_IMPLICIT_ONE = 0x0010000000000000_u64 # hiden bit
 D64_EXP_POS      =                     52
 D64_EXP_BIAS     =                   1075
 D_1_LOG2_10      =    0.30102999566398114 # 1 / lg(10)
-MASK32           =         0xFFFFFFFF_u64
+MASK32           =         0xFFFFFFFF_u32
+
+PHYSICAL_SIGNIFICAND_SIZE = 52 # Excludes the hidden bit
+SIGNIFICAND_SIZE          = 53
+EXPONENT_BIAS             = 0x7F + PHYSICAL_SIGNIFICAND_SIZE
+DENORMAL_EXPONENT         = -EXPONENT_BIAS + 1
 
 # The minimal and maximal target exponent define the range of w's binary
 # exponent, where 'w' is the result of multiplying the input by a cached power
@@ -46,6 +51,14 @@ struct DiyFP
   def initialize(@frac, @exp)
   end
 
+  def initialize(@frac, exp : Int16)
+    @exp = exp.to_i32
+  end
+
+  def new(frac : Int32, exp)
+    new frac.to_u64, exp
+  end
+
   # The exponents of both numbers must be the same and the frac of self must be greater than the other.
   # This result is not normalized.
   def -(other : DiyFP)
@@ -54,6 +67,10 @@ struct DiyFP
   end
 
   # does not normalize result
+  # Simply "emulates" a 128 bit multiplication.
+  # However: the resulting number only contains 64 bits. The least
+  # significant 64 bits are only used for rounding the most significant 64
+  # bits.
   def *(other : DiyFP)
     a = frac >> 32
     b = frac & MASK32
@@ -64,6 +81,8 @@ struct DiyFP
     ad = a*d
     bd = b*d
     tmp = (bd >> 32) + (ad & MASK32) + (bc & MASK32)
+    # By adding 1U << 31 to tmp we round the final result.
+    # Halfway cases will be round up.
     tmp += 1_u32 << 31
     f = ac + (ad >> 32) + (bc >> 32) + (tmp >> 32)
     e = exp + other.exp + 64
@@ -73,7 +92,7 @@ struct DiyFP
 
   # Normalize such that the most signficiant bit of frac is set
   def normalize
-    raise "no" if frac != 0
+    raise "no" unless frac != 0
     while (frac & 0xFFC0000000000000_u64) != 0
       self.frac <<= 10
       self.exp = -10
@@ -86,13 +105,16 @@ struct DiyFP
   end
 
   def self.from_f64(d : Float64)
-    u64 = (pointerof(d).as UInt64*).value
-    if (u64 & D64_EXP_MASK) != 0
-      frac = u64 & D64_FRACT_MASK
+    raise "not positive" unless d > 0
+    d64 = (pointerof(d).as UInt64*).value
+    raise "special: nan, inf" if (d64 & D64_EXP_MASK) == D64_EXP_MASK
+
+    if (d64 & D64_EXP_MASK) == 0 # denormal float
+      frac = d64 & D64_FRACT_MASK
       exp = 1 - D64_EXP_BIAS
     else
-      frac = (u64 & D64_FRACT_MASK) + D64_IMPLICIT_ONE
-      exp = (((u64 & D64_EXP_MASK) >> D64_EXP_POS) - D64_EXP_BIAS).to_i
+      frac = (d64 & D64_FRACT_MASK) + D64_IMPLICIT_ONE
+      exp = (((d64 & D64_EXP_MASK) >> D64_EXP_POS) - D64_EXP_BIAS).to_i
     end
 
     new(frac, exp)
@@ -213,12 +235,12 @@ def largest_pow10(n, n_bits)
 end
 
 def get_cached_power_for_binary_exponent(exp)
-  min_exp = MIN_TARGET_EXP - (exp + SIGNIFICAND_SIZE)
-  max_exp = MAX_TARGET_EXP - (exp + SIGNIFICAND_SIZE)
-  k = ((min_exp + SIGNIFICAND_SIZE - 1) * D_1_LOG2_10).ceil
+  min_exp = MIN_TARGET_EXP - (exp + DiyFP::SIGNIFICAND_SIZE)
+  max_exp = MAX_TARGET_EXP - (exp + DiyFP::SIGNIFICAND_SIZE)
+  k = ((min_exp + DiyFP::SIGNIFICAND_SIZE - 1) * D_1_LOG2_10).ceil
   index = ((CACHED_POWER_OFFSET + k - 1) / CACHED_EXP_STEP + 1).to_i
   pow = PowCache[index]
-  return pow.decimal_exp, DiyFP.new(pow.significand, pow.binary_exp)
+  return DiyFP.new(pow.significand, pow.binary_exp), pow.decimal_exp
 end
 
 # Adjusts the last digit of the generated number, and screens out generated
@@ -318,7 +340,7 @@ def round_weed(buffer, length, distance_too_high_w, unsafe_interval, rest, ten_k
  (rest + ten_kappa < small_distance ||  # buffer{-1} > w_high
  small_distance - rest >= rest + ten_kappa - small_distance)
         )
-    buffer[len - 1] -= 1
+    buffer[length - 1] -= 1
     rest += ten_kappa
   end
 
@@ -384,9 +406,10 @@ end
 # represents w. However we have to pay attention to low, high and w's
 # imprecision.
 def digit_gen(low : DiyFP, w : DiyFP, high : DiyFP, buffer, length) : {Bool, Int32}
-  raise "no" unless low.exp == w.exp && w.exp == high.exp
-  raise "no" unless low.frac + 1 <= high.frac - 1
-  raise "no" unless MIN_TARGET_EXP <= w.exp && w.e <= MAX_TARGET_EXP
+  pp [low.exp, w.exp, high.exp]
+  raise "no low" unless low.exp == w.exp && w.exp == high.exp
+  raise "no frac" unless low.frac + 1 <= high.frac - 1
+  raise "no target" unless MIN_TARGET_EXP <= w.exp && w.exp <= MAX_TARGET_EXP
   # low, w and high are imprecise, but by less than one ulp (unit in the last
   # place).
   # If we remove (resp. add) 1 ulp from low (resp. high) we are certain that
@@ -433,6 +456,10 @@ def digit_gen(low : DiyFP, w : DiyFP, high : DiyFP, buffer, length) : {Bool, Int
 
     # Note that kappa now equals the exponent of the divisor and that the
     # invariant thus holds again.
+    rest = (integrals << -one.exp) + fractionals
+
+    # Invariant: too_high = buffer * 10^kappa + DiyFp(rest, one.e())
+    # Reminder: unsafe_interval.e() == one.e()
     if rest < unsafe_interval.frac
       # Rounding down (by not emitting the remaining digits) yields a number
       # that lies within the unsafe interval.
@@ -449,9 +476,9 @@ def digit_gen(low : DiyFP, w : DiyFP, high : DiyFP, buffer, length) : {Bool, Int
   # data (like the interval or 'unit'), too.
   # Note that the multiplication by 10 does not overflow, because w.e >= -60
   # and thus one.e >= -60.
-  raise "no" unless one.exp > -60
-  raise "no" unless fractionals < one.frac
-  raise "no" unless 0xFFFFFFFFFFFFFFFF / 10 >= one.frac
+  raise "no exp 60" unless one.exp > -60
+  raise "no fractionals one" unless fractionals < one.frac
+  raise "no one frac" unless 0xFFFFFFFFFFFFFFFF / 10 >= one.frac
   loop do
     fractionals *= 10
     unit *= 10
@@ -467,6 +494,36 @@ def digit_gen(low : DiyFP, w : DiyFP, high : DiyFP, buffer, length) : {Bool, Int
   end
 end
 
+# Computes the two boundaries of v.
+# The bigger boundary (m_plus) is normalized. The lower boundary has the same
+# exponent as m_plus.
+# Precondition: the value encoded by this Double must be greater than 0.
+def normalized_boundaries(v : Float64)
+  raise "not pos" unless v > 0
+  w = DiyFP.from_f64(v)
+  m_plus = DiyFP.new((w.frac << 1) + 1, w.exp - 1).normalize
+
+  u64 = (pointerof(v).as UInt64*).value
+
+  # The boundary is closer if the significand is of the form f == 2^p-1 then
+  # the lower boundary is closer.
+  # Think of v = 1000e10 and v- = 9999e9.
+  # Then the boundary (== (v - v-)/2) is not just at a distance of 1e9 but
+  # at a distance of 1e8.
+  # The only exception is for the smallest normal: the largest denormal is
+  # at the same distance as its successor.
+  # Note: denormals have the same exponent as the smallest normals.
+  physical_significand_is_zero = (u64 & D64_FRACT_MASK) == 0
+  lower_bound_closer = physical_significand_is_zero && ((u64 & D64_EXP_MASK) != DENORMAL_EXPONENT)
+  f, e = if lower_bound_closer
+           {(w.frac << 2) - 1, w.exp - 2}
+         else
+           {(w.frac << 1) - 1, w.exp - 1}
+         end
+  m_minus = DiyFP.new(f << (e - m_plus.exp), m_plus.exp)
+  return {m_minus, m_plus, w}
+end
+
 # Provides a decimal representation of v.
 # Returns true if it succeeds, otherwise the result cannot be trusted.
 # There will be *length digits inside the buffer (not null-terminated).
@@ -480,22 +537,12 @@ end
 # computed.
 def grisu3(v : Float64, buffer) : {Bool, Int32}
   length = buffer.size
-  w = DiyFP.from_f64(v)
 
   # boundary_minus and boundary_plus are the boundaries between v and its
   # closest floating-point neighbors. Any number strictly between
   # boundary_minus and boundary_plus will round to v when convert to a double.
   # Grisu3 will never output representations that lie exactly on a boundary.
-  boundary_plus = DiyFP.new((w << 1) + 1, w.exp - 1).normalize
-  raise "no" unless v > 0 && v <= 1.7976931348623157e308 # Grisu only handles strictly positive finite numbers.
-  u64 = (pointerof(v).as UInt64*).value
-  bm_f, bm_e = if !(u64 & D64_FRACT_MASK) && (u64 & D64_EXP_MASK) != 0 # lower boundary is closer
-                 {(w.frac << 2) - 1, w.exp - 2}
-               else
-                 {(w.frac << 1) - 1, w.exp - 1}
-               end
-  boundary_minus = DiyFP.new(bm_f << (bm_e - boundary_plus.exp), boundary_plus.exp)
-  raise "no" unless boundary_plus.exp == w.exp
+  boundary_minus, boundary_plus, w = normalized_boundaries(v)
 
   ten_mk, mk = get_cached_power_for_binary_exponent(w.exp)
 
@@ -527,5 +574,17 @@ def grisu3(v : Float64, buffer) : {Bool, Int32}
   result, kappa = digit_gen(scaled_boundary_minus, scaled_w, scaled_boundary_plus, buffer, length)
 
   decimal_exponent = -mk + kappa
-  return result, decimal_exponent
+  return result, decimal_exponent.to_i32
 end
+
+def fast_dtoa(v : Float64, buffer)
+  result, decimal_exponent = grisu3(v, buffer)
+  if result
+    puts "result"
+  end
+  decimal_point = buffer.size + decimal_exponent
+end
+
+#buff = Array(UInt8).new(16)
+#puts fast_dtoa(1.23, buff)
+#p buff
