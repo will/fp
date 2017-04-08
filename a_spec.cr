@@ -81,4 +81,35 @@ describe DiyFP do
     fp.exp.should eq 0x7FE - 0x3FF - 52
     fp.frac.should eq 0x001fffffffffffff_u64
   end
+
+  it "normalizes ordered" do
+    ordered = 0x0123456789ABCDEF_u64
+    f = pointerof(ordered).as(Float64*).value
+
+    fp = DiyFP.from_f64(f).normalize
+
+    fp.exp.should eq 0x12 - 0x3FF - 52 - 11
+    fp.frac.should eq 0x0013456789ABCDEF_u64 << 11
+  end
+
+  it "normalizes min f64" do
+    min = 0x0000000000000001_u64
+    f = pointerof(min).as(Float64*).value
+
+    fp = DiyFP.from_f64(f).normalize
+
+    fp.exp.should eq -0x3FF - 52 + 1 - 63
+    # This is a denormal; so no hidden bit
+    fp.frac.should eq 0x8000000000000000
+  end
+
+  it "normalizes max f64" do
+    max = 0x7fefffffffffffff_u64
+    f = pointerof(max).as(Float64*).value
+
+    fp = DiyFP.from_f64(f).normalize
+
+    fp.exp.should eq 0x7FE - 0x3FF - 52 - 11
+    fp.frac.should eq 0x001fffffffffffff << 11
+  end
 end

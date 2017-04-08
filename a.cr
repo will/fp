@@ -93,15 +93,19 @@ struct DiyFP
   # Normalize such that the most signficiant bit of frac is set
   def normalize
     raise "no" unless frac != 0
-    while (frac & 0xFFC0000000000000_u64) != 0
-      self.frac <<= 10
-      self.exp = -10
+    f = frac
+    e = exp
+
+    # could be a denormal
+    while (f & D64_IMPLICIT_ONE) == 0
+      f <<= 1
+      e -= 1
     end
-    while (frac & D64_SIGN) != 0
-      self.frac <<= 1
-      self.exp -= 1
-    end
-    self
+
+    # do the final shifts in one go
+    f <<= 11 # DiyFP::SIGNIFICAND_SIZE - ::SIGNIFICAND_SIZE
+    e -= 11
+    DiyFP.new(f, e)
   end
 
   def self.from_f64(d : Float64)
