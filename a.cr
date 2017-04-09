@@ -429,7 +429,7 @@ end
 # represent 'w' we can stop. Everything inside the interval low - high
 # represents w. However we have to pay attention to low, high and w's
 # imprecision.
-def digit_gen(low : DiyFP, w : DiyFP, high : DiyFP, buffer, length) : {Bool, Int32}
+def digit_gen(low : DiyFP, w : DiyFP, high : DiyFP, buffer) : {Bool, Int32, Int32}
   raise "no low" unless low.exp == w.exp && w.exp == high.exp
   raise "no frac" unless low.frac + 1 <= high.frac - 1
   raise "no target" unless MIN_TARGET_EXP <= w.exp && w.exp <= MAX_TARGET_EXP
@@ -465,6 +465,8 @@ def digit_gen(low : DiyFP, w : DiyFP, high : DiyFP, buffer, length) : {Bool, Int
 
   divisor, kappa = largest_pow10(integrals, DiyFP::SIGNIFICAND_SIZE - (-one.exp)) # TODO can this be +
   length = 0
+  #pp kappa
+  #pp divisor
 
   # Loop invariant: buffer = too_high / 10^kappa  (integer division)
   # The invariant holds for the first iteration: kappa has been initialized
@@ -472,7 +474,7 @@ def digit_gen(low : DiyFP, w : DiyFP, high : DiyFP, buffer, length) : {Bool, Int
   # that is smaller than integrals.
   while kappa > 0
     digit = integrals / divisor
-    pp [digit, kappa]
+    #pp [digit, kappa]
     raise "digit: #{digit} > 9" unless digit <= 9
     buffer[length] = 48_u8 + digit
     length += 1
@@ -489,7 +491,7 @@ def digit_gen(low : DiyFP, w : DiyFP, high : DiyFP, buffer, length) : {Bool, Int
       # Rounding down (by not emitting the remaining digits) yields a number
       # that lies within the unsafe interval.
       weeded = round_weed(buffer, length, (too_high - w).frac, unsafe_interval.frac, rest, divisor << -one.exp, unit)
-      return weeded, kappa
+      return weeded, kappa, length
     end
 
     divisor /= 10
@@ -509,12 +511,14 @@ def digit_gen(low : DiyFP, w : DiyFP, high : DiyFP, buffer, length) : {Bool, Int
     unit *= 10
     unsafe_interval = DiyFP.new(unsafe_interval.frac * 10, unsafe_interval.exp)
     digit = (fractionals >> -one.exp).to_i
+    raise "digit #{digit} > 9" unless digit <= 9
+    buffer[length] = 48_u8 + digit
     length += 1
     fractionals &= one.frac - 1
     kappa -= 1
     if fractionals < unsafe_interval.frac
       weeded = round_weed(buffer, length, (too_high - w).frac * unit, unsafe_interval.frac, fractionals, one.frac, unit)
-      return weeded, kappa
+      return weeded, kappa, length
     end
   end
 end
@@ -589,7 +593,7 @@ end
 # The last digit will be closest to the actual v. That is, even if several
 # digits might correctly yield 'v' when read again, the closest will be
 # computed.
-def grisu3(v : Float64, buffer) : {Bool, Int32}
+def grisu3(v : Float64, buffer) : {Bool, Int32, Int32}
   length = buffer.size
   w = DiyFP.from_f64_normalized(v)
 
@@ -628,18 +632,15 @@ def grisu3(v : Float64, buffer) : {Bool, Int32}
   # integer than it will be updated. For instance if scaled_w == 1.23 then
   # the buffer will be filled with "123" und the decimal_exponent will be
   # decreased by 2.
-  result, kappa = digit_gen(scaled_boundary_minus, scaled_w, scaled_boundary_plus, buffer, length)
+  result, kappa, length = digit_gen(scaled_boundary_minus, scaled_w, scaled_boundary_plus, buffer)
 
   decimal_exponent = -mk + kappa
-  return result, decimal_exponent.to_i32
+  return result, decimal_exponent, length
 end
 
 def fast_dtoa(v : Float64, buffer)
-  result, decimal_exponent = grisu3(v, buffer)
-  if result
-    puts "result"
-  end
-  decimal_point = buffer.size + decimal_exponent
+  result, decimal_exponent, length = grisu3(v, buffer)
+  decimal_point = length + decimal_exponent
 end
 
 #buff = Array(UInt8).new(16)

@@ -182,7 +182,8 @@ end
 
 private def test_grisu(v : Float64)
   buffer = Slice.new(128, 0_u8)
-  status, point = grisu3(v, buffer)
+  status, decimal_exponent, length = grisu3(v, buffer)
+  point = decimal_exponent+length
   return status, point, String.new(buffer.pointer(0))
 end
 
