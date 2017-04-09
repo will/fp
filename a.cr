@@ -1,6 +1,14 @@
+require "./cached_powers"
 # ported from
 # https://github.com/juj/MathGeoLib/blob/master/src/Math/grisu3.c
 # Apache license
+private macro assert(exp, file = __FILE__, line = __LINE__)
+  {% if !flag?(:release) %}
+    unless {{exp}}
+      raise "Assertion Failed #{{{file}}}:#{{{line}}}"
+    end
+  {% end %}
+end
 
 D64_SIGN         = 0x8000000000000000_u64
 D64_EXP_MASK     = 0x7FF0000000000000_u64
@@ -15,30 +23,6 @@ SIGNIFICAND_SIZE          = 53 # float64
 EXPONENT_BIAS             = 0x3FF + PHYSICAL_SIGNIFICAND_SIZE # same as D64_EXP_BIAS
 DENORMAL_EXPONENT         = -EXPONENT_BIAS + 1
 
-# The minimal and maximal target exponent define the range of w's binary
-# exponent, where 'w' is the result of multiplying the input by a cached power
-# of ten.
-#
-# A different range might be chosen on a different platform, to optimize digit
-# generation, but a smaller range requires more powers of ten to be cached.
-MIN_TARGET_EXP = -60
-MAX_TARGET_EXP = -32
-
-@[AlwaysInline]
-def min(a, b)
-  a >= b ? a : b
-end
-
-@[AlwaysInline]
-def max(a, b)
-  a >= b ? a : b
-end
-
-CACHED_POWER_OFFSET =  348 # -1 * the first decimal_exp
-CACHED_EXP_STEP     =    8 # decimal exponent distance
-MIN_CACHED_EXP      = -348
-MAX_CACHED_EXP      = 340
-D_1_LOG2_10         =    0.30102999566398114 # 1 / lg(10)
 
 # Do it yourself Floating Point
 # Does not support special NaN and Infinity
@@ -63,7 +47,7 @@ struct DiyFP
   # The exponents of both numbers must be the same and the frac of self must be greater than the other.
   # This result is not normalized.
   def -(other : DiyFP)
-    raise "no" unless self.exp == other.exp && frac >= other.frac
+    assert self.exp == other.exp && frac >= other.frac
     self.class.new(frac - other.frac, exp)
   end
 
@@ -93,7 +77,7 @@ struct DiyFP
 
 
   def normalize
-    raise "frac!=0" unless frac != 0
+    assert frac != 0
     f = frac
     e = exp
 
@@ -117,9 +101,9 @@ struct DiyFP
   end
 
   def self.from_f64(d : Float64)
-    raise "not positive" unless d > 0
+    assert d > 0
     d64 = (pointerof(d).as UInt64*).value
-    raise "special: nan, inf" if (d64 & D64_EXP_MASK) == D64_EXP_MASK
+    assert (d64 & D64_EXP_MASK) != D64_EXP_MASK
 
     if (d64 & D64_EXP_MASK) == 0 # denormal float
       frac = d64 & D64_FRACT_MASK
@@ -151,121 +135,8 @@ struct DiyFP
   end
 end
 
-record Power, significand : UInt64, binary_exp : Int16, decimal_exp : Int16
 
-PowCache = [
-  {0xfa8fd5a0081c0288_u64, -1220_i16, -348_i16},
-  {0xbaaee17fa23ebf76_u64, -1193_i16, -340_i16},
-  {0x8b16fb203055ac76_u64, -1166_i16, -332_i16},
-  {0xcf42894a5dce35ea_u64, -1140_i16, -324_i16},
-  {0x9a6bb0aa55653b2d_u64, -1113_i16, -316_i16},
-  {0xe61acf033d1a45df_u64, -1087_i16, -308_i16},
-  {0xab70fe17c79ac6ca_u64, -1060_i16, -300_i16},
-  {0xff77b1fcbebcdc4f_u64, -1034_i16, -292_i16},
-  {0xbe5691ef416bd60c_u64, -1007_i16, -284_i16},
-  {0x8dd01fad907ffc3c_u64, -980_i16, -276_i16},
-  {0xd3515c2831559a83_u64, -954_i16, -268_i16},
-  {0x9d71ac8fada6c9b5_u64, -927_i16, -260_i16},
-  {0xea9c227723ee8bcb_u64, -901_i16, -252_i16},
-  {0xaecc49914078536d_u64, -874_i16, -244_i16},
-  {0x823c12795db6ce57_u64, -847_i16, -236_i16},
-  {0xc21094364dfb5637_u64, -821_i16, -228_i16},
-  {0x9096ea6f3848984f_u64, -794_i16, -220_i16},
-  {0xd77485cb25823ac7_u64, -768_i16, -212_i16},
-  {0xa086cfcd97bf97f4_u64, -741_i16, -204_i16},
-  {0xef340a98172aace5_u64, -715_i16, -196_i16},
-  {0xb23867fb2a35b28e_u64, -688_i16, -188_i16},
-  {0x84c8d4dfd2c63f3b_u64, -661_i16, -180_i16},
-  {0xc5dd44271ad3cdba_u64, -635_i16, -172_i16},
-  {0x936b9fcebb25c996_u64, -608_i16, -164_i16},
-  {0xdbac6c247d62a584_u64, -582_i16, -156_i16},
-  {0xa3ab66580d5fdaf6_u64, -555_i16, -148_i16},
-  {0xf3e2f893dec3f126_u64, -529_i16, -140_i16},
-  {0xb5b5ada8aaff80b8_u64, -502_i16, -132_i16},
-  {0x87625f056c7c4a8b_u64, -475_i16, -124_i16},
-  {0xc9bcff6034c13053_u64, -449_i16, -116_i16},
-  {0x964e858c91ba2655_u64, -422_i16, -108_i16},
-  {0xdff9772470297ebd_u64, -396_i16, -100_i16},
-  {0xa6dfbd9fb8e5b88f_u64, -369_i16, -92_i16},
-  {0xf8a95fcf88747d94_u64, -343_i16, -84_i16},
-  {0xb94470938fa89bcf_u64, -316_i16, -76_i16},
-  {0x8a08f0f8bf0f156b_u64, -289_i16, -68_i16},
-  {0xcdb02555653131b6_u64, -263_i16, -60_i16},
-  {0x993fe2c6d07b7fac_u64, -236_i16, -52_i16},
-  {0xe45c10c42a2b3b06_u64, -210_i16, -44_i16},
-  {0xaa242499697392d3_u64, -183_i16, -36_i16},
-  {0xfd87b5f28300ca0e_u64, -157_i16, -28_i16},
-  {0xbce5086492111aeb_u64, -130_i16, -20_i16},
-  {0x8cbccc096f5088cc_u64, -103_i16, -12_i16},
-  {0xd1b71758e219652c_u64, -77_i16, -4_i16},
-  {0x9c40000000000000_u64, -50_i16, 4_i16},
-  {0xe8d4a51000000000_u64, -24_i16, 12_i16},
-  {0xad78ebc5ac620000_u64, 3_i16, 20_i16},
-  {0x813f3978f8940984_u64, 30_i16, 28_i16},
-  {0xc097ce7bc90715b3_u64, 56_i16, 36_i16},
-  {0x8f7e32ce7bea5c70_u64, 83_i16, 44_i16},
-  {0xd5d238a4abe98068_u64, 109_i16, 52_i16},
-  {0x9f4f2726179a2245_u64, 136_i16, 60_i16},
-  {0xed63a231d4c4fb27_u64, 162_i16, 68_i16},
-  {0xb0de65388cc8ada8_u64, 189_i16, 76_i16},
-  {0x83c7088e1aab65db_u64, 216_i16, 84_i16},
-  {0xc45d1df942711d9a_u64, 242_i16, 92_i16},
-  {0x924d692ca61be758_u64, 269_i16, 100_i16},
-  {0xda01ee641a708dea_u64, 295_i16, 108_i16},
-  {0xa26da3999aef774a_u64, 322_i16, 116_i16},
-  {0xf209787bb47d6b85_u64, 348_i16, 124_i16},
-  {0xb454e4a179dd1877_u64, 375_i16, 132_i16},
-  {0x865b86925b9bc5c2_u64, 402_i16, 140_i16},
-  {0xc83553c5c8965d3d_u64, 428_i16, 148_i16},
-  {0x952ab45cfa97a0b3_u64, 455_i16, 156_i16},
-  {0xde469fbd99a05fe3_u64, 481_i16, 164_i16},
-  {0xa59bc234db398c25_u64, 508_i16, 172_i16},
-  {0xf6c69a72a3989f5c_u64, 534_i16, 180_i16},
-  {0xb7dcbf5354e9bece_u64, 561_i16, 188_i16},
-  {0x88fcf317f22241e2_u64, 588_i16, 196_i16},
-  {0xcc20ce9bd35c78a5_u64, 614_i16, 204_i16},
-  {0x98165af37b2153df_u64, 641_i16, 212_i16},
-  {0xe2a0b5dc971f303a_u64, 667_i16, 220_i16},
-  {0xa8d9d1535ce3b396_u64, 694_i16, 228_i16},
-  {0xfb9b7cd9a4a7443c_u64, 720_i16, 236_i16},
-  {0xbb764c4ca7a44410_u64, 747_i16, 244_i16},
-  {0x8bab8eefb6409c1a_u64, 774_i16, 252_i16},
-  {0xd01fef10a657842c_u64, 800_i16, 260_i16},
-  {0x9b10a4e5e9913129_u64, 827_i16, 268_i16},
-  {0xe7109bfba19c0c9d_u64, 853_i16, 276_i16},
-  {0xac2820d9623bf429_u64, 880_i16, 284_i16},
-  {0x80444b5e7aa7cf85_u64, 907_i16, 292_i16},
-  {0xbf21e44003acdd2d_u64, 933_i16, 300_i16},
-  {0x8e679c2f5e44ff8f_u64, 960_i16, 308_i16},
-  {0xd433179d9c8cb841_u64, 986_i16, 316_i16},
-  {0x9e19db92b4e31ba9_u64, 1013_i16, 324_i16},
-  {0xeb96bf6ebadf77d9_u64, 1039_i16, 332_i16},
-  {0xaf87023b9bf0ee6b_u64, 1066_i16, 340_i16},
-].map { |t| Power.new t[0], t[1], t[2] }
 
-Pow10Cache = {0, 1, 10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000, 1000000000}
-
-def largest_pow10(n, n_bits)
-  # 1233/4096 is approximately 1/lg(10).
-  #  We increment to skip over the first entry in the powers cache.
-  guess = ((n_bits + 1) * 1233 >> 12) + 1
-
-  # We don't have any guarantees that 2^number_bits <= number.<Paste>
-  guess -= 1 if n < Pow10Cache[guess]
-
-  return Pow10Cache[guess], guess
-end
-
-def get_cached_power_for_binary_exponent(exp) : {DiyFP, Int32}
-  min_exp = MIN_TARGET_EXP - (exp + DiyFP::SIGNIFICAND_SIZE)
-  max_exp = MAX_TARGET_EXP - (exp + DiyFP::SIGNIFICAND_SIZE)
-  k = ((min_exp + DiyFP::SIGNIFICAND_SIZE - 1) * D_1_LOG2_10).ceil
-  index = ((CACHED_POWER_OFFSET + k.to_i - 1) / CACHED_EXP_STEP) + 1
-  pow = PowCache[index]
-  raise "min_exp wrong" unless min_exp <= pow.binary_exp
-  raise "max_exp wrong" unless pow.binary_exp <= max_exp
-  return DiyFP.new(pow.significand, pow.binary_exp), pow.decimal_exp.to_i
-end
 
 # Adjusts the last digit of the generated number, and screens out generated
 # solutions that may be inaccurate. A solution may be inaccurate if it is
@@ -357,7 +228,7 @@ def round_weed(buffer, length, distance_too_high_w, unsafe_interval, rest, ten_k
   # Conceptually rest ~= too_high - buffer
   # We need to do the following tests in this order to avoid over- and
   # underflows.
-  raise "no" unless rest <= unsafe_interval
+  assert rest <= unsafe_interval
   while (
           rest < small_distance &&      # Negated condition 1
  unsafe_interval - rest >= ten_kappa && # Negated condition 2
@@ -430,9 +301,9 @@ end
 # represents w. However we have to pay attention to low, high and w's
 # imprecision.
 def digit_gen(low : DiyFP, w : DiyFP, high : DiyFP, buffer) : {Bool, Int32, Int32}
-  raise "no low" unless low.exp == w.exp && w.exp == high.exp
-  raise "no frac" unless low.frac + 1 <= high.frac - 1
-  raise "no target" unless MIN_TARGET_EXP <= w.exp && w.exp <= MAX_TARGET_EXP
+  assert low.exp == w.exp && w.exp == high.exp
+  assert low.frac + 1 <= high.frac - 1
+  assert CachedPowers::MIN_TARGET_EXP <= w.exp && w.exp <= CachedPowers::MAX_TARGET_EXP
   # low, w and high are imprecise, but by less than one ulp (unit in the last
   # place).
   # If we remove (resp. add) 1 ulp from low (resp. high) we are certain that
@@ -463,7 +334,7 @@ def digit_gen(low : DiyFP, w : DiyFP, high : DiyFP, buffer) : {Bool, Int32, Int3
   # Modulo by one is an and.
   fractionals = too_high.frac & (one.frac - 1)
 
-  divisor, kappa = largest_pow10(integrals, DiyFP::SIGNIFICAND_SIZE - (-one.exp)) # TODO can this be +
+  divisor, kappa = CachedPowers.largest_pow10(integrals, DiyFP::SIGNIFICAND_SIZE - (-one.exp)) # TODO can this be +
   length = 0
   #pp kappa
   #pp divisor
@@ -475,7 +346,7 @@ def digit_gen(low : DiyFP, w : DiyFP, high : DiyFP, buffer) : {Bool, Int32, Int3
   while kappa > 0
     digit = integrals / divisor
     #pp [digit, kappa]
-    raise "digit: #{digit} > 9" unless digit <= 9
+    assert digit <= 9
     buffer[length] = 48_u8 + digit
     length += 1
     integrals %= divisor
@@ -503,15 +374,15 @@ def digit_gen(low : DiyFP, w : DiyFP, high : DiyFP, buffer) : {Bool, Int32, Int3
   # data (like the interval or 'unit'), too.
   # Note that the multiplication by 10 does not overflow, because w.e >= -60
   # and thus one.e >= -60.
-  raise "no exp 60" unless one.exp > -60
-  raise "no fractionals one" unless fractionals < one.frac
-  raise "no one frac" unless 0xFFFFFFFFFFFFFFFF / 10 >= one.frac
+  assert one.exp > -60
+  assert fractionals < one.frac
+  assert 0xFFFFFFFFFFFFFFFF / 10 >= one.frac
   loop do
     fractionals *= 10
     unit *= 10
     unsafe_interval = DiyFP.new(unsafe_interval.frac * 10, unsafe_interval.exp)
     digit = (fractionals >> -one.exp).to_i
-    raise "digit #{digit} > 9" unless digit <= 9
+    assert digit <= 9
     buffer[length] = 48_u8 + digit
     length += 1
     fractionals &= one.frac - 1
@@ -528,7 +399,7 @@ end
 # exponent as m_plus.
 # Precondition: the value encoded by this Double must be greater than 0.
 def normalized_boundaries(v : Float64)
-  raise "not pos" unless v > 0
+  assert v > 0
   w = DiyFP.from_f64(v)
   #pp w
  # p "inner: #{DiyFP.new((w.frac << 1) + 1, w.exp - 1).inspect}"
@@ -602,9 +473,9 @@ def grisu3(v : Float64, buffer) : {Bool, Int32, Int32}
   # boundary_minus and boundary_plus will round to v when convert to a double.
   # Grisu3 will never output representations that lie exactly on a boundary.
   boundaries = normalized_boundaries(v)
-  raise "boundry_plus wrong" unless boundaries[:plus].exp == w.exp
+  assert boundaries[:plus].exp == w.exp
 
-  ten_mk, mk = get_cached_power_for_binary_exponent(w.exp)
+  ten_mk, mk = CachedPowers.get_cached_power_for_binary_exponent(w.exp)
 
   # Note that ten_mk is only an approximation of 10^-k. A DiyFp only contains a
   # 64 bit significand and ten_mk is thus only precise up to 64 bits.
@@ -616,7 +487,7 @@ def grisu3(v : Float64, buffer) : {Bool, Int32, Int32}
   # In other words: let f = scaled_w.f() and e = scaled_w.e(), then
   #           (f-1) * 2^e < w*10^k < (f+1) * 2^e
   scaled_w = w * ten_mk
-  raise "scaled_w wrong" unless scaled_w.exp == boundaries[:plus].exp + ten_mk.exp + DiyFP::SIGNIFICAND_SIZE
+  assert scaled_w.exp == boundaries[:plus].exp + ten_mk.exp + DiyFP::SIGNIFICAND_SIZE
 
   # In theory it would be possible to avoid some recomputations by computing
   # the difference between w and boundary_minus/plus (a power of 2) and to
