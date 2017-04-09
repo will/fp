@@ -255,3 +255,9 @@ describe "grisu3" do
     point.should eq -307
   end
 end
+
+describe "to_s" do
+  it "" do
+    123.456.fast_to_s.should eq "123.456"
+  end
+end

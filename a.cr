@@ -643,6 +643,36 @@ def fast_dtoa(v : Float64, buffer)
   decimal_point = length + decimal_exponent
 end
 
+struct Float64
+  def fast_to_s
+    String.build(22) do |buff|
+      fast_to_s(buff)
+    end
+  end
+
+  def fast_to_s(buffer)
+    String.build(22) do |buff|
+      fast_to_s(buff, buffer)
+    end
+  end
+
+  def fast_to_s(io : IO)
+    buffer = Slice.new(128, 0_u8)
+    fast_to_s(io, buffer)
+  end
+
+  def fast_to_s(io : IO, buffer)
+    status, decimal_exponent, length = ::grisu3(self, buffer)
+    point = decimal_exponent+length
+    i = 0
+    while i < length
+      io << '.' if i == point
+      io.write_byte buffer[i]
+      i += 1
+    end
+  end
+end
+
 #buff = Array(UInt8).new(16)
 #puts fast_dtoa(1.23, buff)
 #p buff
