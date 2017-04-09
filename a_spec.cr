@@ -179,3 +179,18 @@ describe "boundaires" do
     (fp - mi).should eq(1 << 10)
   end
 end
+
+private def test_grisu(v : Float64)
+  buffer = Slice.new(128, 0_u8)
+  status, point = grisu3(v, buffer)
+  return status, point, String.new(buffer.pointer(0))
+end
+
+describe "grisu3" do
+  it "regular" do
+    status, point, str = test_grisu 4294967272.0
+    status.should eq true
+    str.should eq "4294967272"
+    point.should eq 10
+  end
+end

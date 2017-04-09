@@ -1,5 +1,7 @@
 require "./a"
 
-buff = Array(UInt8).new(128)
-p grisu3(1.5, buff)
-p buff
+v = ARGV[0].to_f
+buff = Slice.new(128, 0_u8)
+p grisu3(v, buff)
+# slice = pointerof(buff).to_slice(128)
+puts String.new(buff)

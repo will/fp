@@ -430,7 +430,6 @@ end
 # represents w. However we have to pay attention to low, high and w's
 # imprecision.
 def digit_gen(low : DiyFP, w : DiyFP, high : DiyFP, buffer, length) : {Bool, Int32}
-  pp [low.exp, w.exp, high.exp]
   raise "no low" unless low.exp == w.exp && w.exp == high.exp
   raise "no frac" unless low.frac + 1 <= high.frac - 1
   raise "no target" unless MIN_TARGET_EXP <= w.exp && w.exp <= MAX_TARGET_EXP
@@ -473,6 +472,8 @@ def digit_gen(low : DiyFP, w : DiyFP, high : DiyFP, buffer, length) : {Bool, Int
   # that is smaller than integrals.
   while kappa > 0
     digit = integrals / divisor
+    pp [digit, kappa]
+    raise "digit: #{digit} > 9" unless digit <= 9
     buffer[length] = 48_u8 + digit
     length += 1
     integrals %= divisor
@@ -480,7 +481,7 @@ def digit_gen(low : DiyFP, w : DiyFP, high : DiyFP, buffer, length) : {Bool, Int
 
     # Note that kappa now equals the exponent of the divisor and that the
     # invariant thus holds again.
-    rest = (integrals << -one.exp) + fractionals
+    rest = (integrals.to_u64 << -one.exp) + fractionals
 
     # Invariant: too_high = buffer * 10^kappa + DiyFp(rest, one.e())
     # Reminder: unsafe_interval.e() == one.e()
