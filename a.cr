@@ -12,7 +12,7 @@ MASK32           =         0xFFFFFFFF_u32
 
 PHYSICAL_SIGNIFICAND_SIZE = 52 # Excludes the hidden bit
 SIGNIFICAND_SIZE          = 53 # float64
-EXPONENT_BIAS             = 0x7F + PHYSICAL_SIGNIFICAND_SIZE
+EXPONENT_BIAS             = 0x3FF + PHYSICAL_SIGNIFICAND_SIZE # same as D64_EXP_BIAS
 DENORMAL_EXPONENT         = -EXPONENT_BIAS + 1
 
 # The minimal and maximal target exponent define the range of w's binary
@@ -525,9 +525,10 @@ end
 def normalized_boundaries(v : Float64)
   raise "not pos" unless v > 0
   w = DiyFP.from_f64(v)
-  #p "inner: #{DiyFP.new((w.frac << 1) + 1, w.exp - 1).inspect}"
+  #pp w
+ # p "inner: #{DiyFP.new((w.frac << 1) + 1, w.exp - 1).inspect}"
   m_plus =    DiyFP.new((w.frac << 1) + 1, w.exp - 1).normalize
- # pp m_plus
+  #pp m_plus
 
   u64 = (pointerof(v).as UInt64*).value
 
@@ -540,14 +541,40 @@ def normalized_boundaries(v : Float64)
   # at the same distance as its successor.
   # Note: denormals have the same exponent as the smallest normals.
   physical_significand_is_zero = (u64 & D64_FRACT_MASK) == 0
-  lower_bound_closer = physical_significand_is_zero && ((u64 & D64_EXP_MASK) != DENORMAL_EXPONENT)
+  #pp physical_significand_is_zero
+
+  lower_bound_closer = physical_significand_is_zero && (exponent(u64) != DENORMAL_EXPONENT)
+  calcualted_exp =  exponent(u64)
+ # pp calcualted_exp
+  calc_denormal = denormal?(u64)
+ # pp calc_denormal
+ # pp lower_bound_closer
+  #pp w
   f, e = if lower_bound_closer
            {(w.frac << 2) - 1, w.exp - 2}
          else
            {(w.frac << 1) - 1, w.exp - 1}
          end
+ # pp ["pre", f,e]
   m_minus = DiyFP.new(f << (e - m_plus.exp), m_plus.exp)
+ # pp m_minus
   return {minus: m_minus, plus: m_plus}
+end
+
+def denormal?(d64 : UInt64) : Bool
+ # pp d64
+ #pp  d64 & D64_EXP_MASK
+
+  (d64 & D64_EXP_MASK) == 0
+end
+
+def exponent(d64 : UInt64)
+ # pp (denormal?(d64))
+  return DENORMAL_EXPONENT if denormal?(d64)
+  baised_e = ((d64 & D64_EXP_MASK) >> PHYSICAL_SIGNIFICAND_SIZE).to_i
+  #puts [(d64 & D64_EXP_MASK).to_i, PHYSICAL_SIGNIFICAND_SIZE]
+  #pp [baised_e, EXPONENT_BIAS]
+  baised_e - EXPONENT_BIAS
 end
 
 # Provides a decimal representation of v.
