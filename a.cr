@@ -490,7 +490,7 @@ def digit_gen(low : DiyFP, w : DiyFP, high : DiyFP, buffer) : {Bool, Int32, Int3
     if rest < unsafe_interval.frac
       # Rounding down (by not emitting the remaining digits) yields a number
       # that lies within the unsafe interval.
-      weeded = round_weed(buffer, length, (too_high - w).frac, unsafe_interval.frac, rest, divisor << -one.exp, unit)
+      weeded = round_weed(buffer, length, (too_high - w).frac, unsafe_interval.frac, rest, divisor.to_u64 << -one.exp, unit)
       return weeded, kappa, length
     end
 
