@@ -40,7 +40,8 @@ DENORMAL_EXPONENT         = -EXPONENT_BIAS + 1
 # Output: returns true if the buffer is guaranteed to contain the closest
 #    representable number to the input.
 #  Modifies the generated digits in the buffer to approach (round towards) w.
-def round_weed(buffer, length, distance_too_high_w, unsafe_interval, rest, ten_kappa, unit)
+def round_weed(buffer_p, length, distance_too_high_w, unsafe_interval, rest, ten_kappa, unit)
+  buffer = buffer_p.to_slice(128)
   small_distance = distance_too_high_w - unit
   big_distance = distance_too_high_w + unit
 
@@ -187,7 +188,8 @@ end
 # represent 'w' we can stop. Everything inside the interval low - high
 # represents w. However we have to pay attention to low, high and w's
 # imprecision.
-def digit_gen(low : DiyFP, w : DiyFP, high : DiyFP, buffer) : {Bool, Int32, Int32}
+def digit_gen(low : DiyFP, w : DiyFP, high : DiyFP, buffer_p) : {Bool, Int32, Int32}
+  buffer = buffer_p.to_slice(128)
   assert low.exp == w.exp && w.exp == high.exp
   assert low.frac + 1 <= high.frac - 1
   assert CachedPowers::MIN_TARGET_EXP <= w.exp && w.exp <= CachedPowers::MAX_TARGET_EXP
@@ -249,7 +251,7 @@ def digit_gen(low : DiyFP, w : DiyFP, high : DiyFP, buffer) : {Bool, Int32, Int3
     if rest < unsafe_interval.frac
       # Rounding down (by not emitting the remaining digits) yields a number
       # that lies within the unsafe interval.
-      weeded = round_weed(buffer, length, (too_high - w).frac, unsafe_interval.frac, rest, divisor.to_u64 << -one.exp, unit)
+      weeded = round_weed(buffer_p, length, (too_high - w).frac, unsafe_interval.frac, rest, divisor.to_u64 << -one.exp, unit)
       return weeded, kappa, length
     end
 
@@ -276,7 +278,7 @@ def digit_gen(low : DiyFP, w : DiyFP, high : DiyFP, buffer) : {Bool, Int32, Int3
     fractionals &= one.frac - 1
     kappa -= 1
     if fractionals < unsafe_interval.frac
-      weeded = round_weed(buffer, length, (too_high - w).frac * unit, unsafe_interval.frac, fractionals, one.frac, unit)
+      weeded = round_weed(buffer_p, length, (too_high - w).frac * unit, unsafe_interval.frac, fractionals, one.frac, unit)
       return weeded, kappa, length
     end
   end
@@ -352,8 +354,9 @@ end
 # The last digit will be closest to the actual v. That is, even if several
 # digits might correctly yield 'v' when read again, the closest will be
 # computed.
-def grisu3(v : Float64, buffer) : {Bool, Int32, Int32}
-  length = buffer.size
+def grisu3(v : Float64, buffer_p) : {Bool, Int32, Int32}
+  buffer = buffer_p.to_slice(128)
+
   w = DiyFP.from_f64_normalized(v)
 
   # boundary_minus and boundary_plus are the boundaries between v and its
@@ -391,7 +394,7 @@ def grisu3(v : Float64, buffer) : {Bool, Int32, Int32}
   # integer than it will be updated. For instance if scaled_w == 1.23 then
   # the buffer will be filled with "123" und the decimal_exponent will be
   # decreased by 2.
-  result, kappa, length = digit_gen(scaled_boundary_minus, scaled_w, scaled_boundary_plus, buffer)
+  result, kappa, length = digit_gen(scaled_boundary_minus, scaled_w, scaled_boundary_plus, buffer_p)
 
   decimal_exponent = -mk + kappa
   return result, decimal_exponent, length
@@ -416,12 +419,8 @@ struct Float64
   end
 
   def fast_to_s(io : IO)
-    buffer = Slice.new(128, 0_u8)
-    fast_to_s(io, buffer)
-  end
-
-  def fast_to_s(io : IO, buffer)
-    status, decimal_exponent, length = ::grisu3(self, buffer)
+    buffer = StaticArray(UInt8, 128).new(0_u8)
+    status, decimal_exponent, length = ::grisu3(self, buffer.to_unsafe)
     point = decimal_exponent+length
     i = 0
     while i < length
