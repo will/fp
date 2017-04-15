@@ -1,5 +1,5 @@
 require "spec"
-require "./a"
+require "./float_printer"
 
 describe DiyFP do
   it "multiply" do
@@ -186,7 +186,7 @@ end
 
 private def test_grisu(v : Float64)
   buffer = StaticArray(UInt8, 128).new(0_u8)
-  status, decimal_exponent, length = grisu3(v, buffer.to_unsafe)
+  status, decimal_exponent, length = Grisu3.grisu3(v, buffer.to_unsafe)
   point = decimal_exponent + length
   return status, point, String.new(buffer.to_unsafe)
 end
