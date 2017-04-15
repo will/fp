@@ -114,7 +114,6 @@ describe DiyFP do
   end
 end
 
-
 private def gen_bound(v : UInt64)
   f = pointerof(v).as(Float64*).value
   gen_bound(f)
@@ -123,7 +122,7 @@ end
 private def gen_bound(v : Float64)
   a = DiyFP.from_f64(v)
   fp = DiyFP.from_f64_normalized(v)
-  b = normalized_boundaries(v)
+  b = IEEE.normalized_boundaries(v)
   b[:minus].exp.should eq fp.exp
   b[:plus].exp.should eq fp.exp
 
@@ -157,7 +156,7 @@ describe "boundaires" do
   end
 
   it "boundaries min normal f64" do
-    fp, mi, pl = gen_bound(0x0010000000000000_u64);
+    fp, mi, pl = gen_bound(0x0010000000000000_u64)
     # Even though the significand is of the form 2^p (for some p), its boundaries
     # are at the same distance. (This is the only exception).
     (fp - mi).should eq(pl - fp)
@@ -186,10 +185,10 @@ private def test_grisu(v : UInt64)
 end
 
 private def test_grisu(v : Float64)
-  buffer = Slice.new(128, 0_u8)
-  status, decimal_exponent, length = grisu3(v, buffer)
-  point = decimal_exponent+length
-  return status, point, String.new(buffer.pointer(0))
+  buffer = StaticArray(UInt8, 128).new(0_u8)
+  status, decimal_exponent, length = grisu3(v, buffer.to_unsafe)
+  point = decimal_exponent + length
+  return status, point, String.new(buffer.to_unsafe)
 end
 
 describe "grisu3" do

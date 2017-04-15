@@ -32,6 +32,8 @@ struct DiyFP
     self.class.new(frac - other.frac, exp)
   end
 
+  MASK32 = 0xFFFFFFFF_u32
+
   # does not normalize result
   # Simply "emulates" a 128 bit multiplication.
   # However: the resulting number only contains 64 bits. The least
@@ -82,17 +84,7 @@ struct DiyFP
 
   def self.from_f64(d : Float64)
     assert d > 0
-    d64 = (pointerof(d).as UInt64*).value
-    assert (d64 & D64_EXP_MASK) != D64_EXP_MASK
-
-    if (d64 & D64_EXP_MASK) == 0 # denormal float
-      frac = d64 & D64_FRACT_MASK
-      exp = 1 - D64_EXP_BIAS
-    else
-      frac = (d64 & D64_FRACT_MASK) + D64_IMPLICIT_ONE
-      exp = (((d64 & D64_EXP_MASK) >> D64_EXP_POS) - D64_EXP_BIAS).to_i
-    end
-
+    frac, exp = IEEE.frac_and_exp(d)
     new(frac, exp)
   end
 
@@ -103,14 +95,14 @@ struct DiyFP
     e = pre_normalized.exp
 
     # could be a denormal
-    while (f & D64_IMPLICIT_ONE) == 0
+    while (f & IEEE::HIDDEN_BIT) == 0
       f <<= 1
       e -= 1
     end
 
     # do the final shifts in one go
-    f <<= DiyFP::SIGNIFICAND_SIZE - 53 # f64 significand size
-    e -= DiyFP::SIGNIFICAND_SIZE - 53
+    f <<= DiyFP::SIGNIFICAND_SIZE - IEEE::SIGNIFICAND_SIZE
+    e -= DiyFP::SIGNIFICAND_SIZE - IEEE::SIGNIFICAND_SIZE
     DiyFP.new(f, e)
   end
 end

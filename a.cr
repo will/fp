@@ -1,5 +1,6 @@
 require "./diy_fp"
 require "./cached_powers"
+require "./ieee"
 # ported from
 # https://github.com/juj/MathGeoLib/blob/master/src/Math/grisu3.c
 # Apache license
@@ -10,20 +11,6 @@ private macro assert(exp, file = __FILE__, line = __LINE__)
     end
   {% end %}
 end
-
-D64_SIGN         = 0x8000000000000000_u64
-D64_EXP_MASK     = 0x7FF0000000000000_u64
-D64_FRACT_MASK   = 0x000FFFFFFFFFFFFF_u64 # aka significand
-D64_IMPLICIT_ONE = 0x0010000000000000_u64 # hiden bit
-D64_EXP_POS      =                     52
-D64_EXP_BIAS     =                   1075
-MASK32           =         0xFFFFFFFF_u32
-
-PHYSICAL_SIGNIFICAND_SIZE = 52 # Excludes the hidden bit
-SIGNIFICAND_SIZE          = 53 # float64
-EXPONENT_BIAS             = 0x3FF + PHYSICAL_SIGNIFICAND_SIZE # same as D64_EXP_BIAS
-DENORMAL_EXPONENT         = -EXPONENT_BIAS + 1
-
 
 # Adjusts the last digit of the generated number, and screens out generated
 # solutions that may be inaccurate. A solution may be inaccurate if it is
@@ -226,8 +213,8 @@ def digit_gen(low : DiyFP, w : DiyFP, high : DiyFP, buffer_p) : {Bool, Int32, In
   # note: In the C++ version this was: SignificandSize - (-one.e())
   divisor, kappa = CachedPowers.largest_pow10(integrals, DiyFP::SIGNIFICAND_SIZE + one.exp)
   length = 0
-  #pp kappa
-  #pp divisor
+  # pp kappa
+  # pp divisor
 
   # Loop invariant: buffer = too_high / 10^kappa  (integer division)
   # The invariant holds for the first iteration: kappa has been initialized
@@ -235,7 +222,7 @@ def digit_gen(low : DiyFP, w : DiyFP, high : DiyFP, buffer_p) : {Bool, Int32, In
   # that is smaller than integrals.
   while kappa > 0
     digit = integrals / divisor
-    #pp [digit, kappa]
+    # pp [digit, kappa]
     assert digit <= 9
     buffer[length] = 48_u8 + digit
     length += 1
@@ -284,65 +271,6 @@ def digit_gen(low : DiyFP, w : DiyFP, high : DiyFP, buffer_p) : {Bool, Int32, In
   end
 end
 
-# Computes the two boundaries of v.
-# The bigger boundary (m_plus) is normalized. The lower boundary has the same
-# exponent as m_plus.
-# Precondition: the value encoded by this Double must be greater than 0.
-def normalized_boundaries(v : Float64)
-  assert v > 0
-  w = DiyFP.from_f64(v)
-  #pp w
- # p "inner: #{DiyFP.new((w.frac << 1) + 1, w.exp - 1).inspect}"
-  m_plus =    DiyFP.new((w.frac << 1) + 1, w.exp - 1).normalize
-  #pp m_plus
-
-  u64 = (pointerof(v).as UInt64*).value
-
-  # The boundary is closer if the significand is of the form f == 2^p-1 then
-  # the lower boundary is closer.
-  # Think of v = 1000e10 and v- = 9999e9.
-  # Then the boundary (== (v - v-)/2) is not just at a distance of 1e9 but
-  # at a distance of 1e8.
-  # The only exception is for the smallest normal: the largest denormal is
-  # at the same distance as its successor.
-  # Note: denormals have the same exponent as the smallest normals.
-  physical_significand_is_zero = (u64 & D64_FRACT_MASK) == 0
-  #pp physical_significand_is_zero
-
-  lower_bound_closer = physical_significand_is_zero && (exponent(u64) != DENORMAL_EXPONENT)
-  calcualted_exp =  exponent(u64)
- # pp calcualted_exp
-  calc_denormal = denormal?(u64)
- # pp calc_denormal
- # pp lower_bound_closer
-  #pp w
-  f, e = if lower_bound_closer
-           {(w.frac << 2) - 1, w.exp - 2}
-         else
-           {(w.frac << 1) - 1, w.exp - 1}
-         end
- # pp ["pre", f,e]
-  m_minus = DiyFP.new(f << (e - m_plus.exp), m_plus.exp)
- # pp m_minus
-  return {minus: m_minus, plus: m_plus}
-end
-
-def denormal?(d64 : UInt64) : Bool
- # pp d64
- #pp  d64 & D64_EXP_MASK
-
-  (d64 & D64_EXP_MASK) == 0
-end
-
-def exponent(d64 : UInt64)
- # pp (denormal?(d64))
-  return DENORMAL_EXPONENT if denormal?(d64)
-  baised_e = ((d64 & D64_EXP_MASK) >> PHYSICAL_SIGNIFICAND_SIZE).to_i
-  #puts [(d64 & D64_EXP_MASK).to_i, PHYSICAL_SIGNIFICAND_SIZE]
-  #pp [baised_e, EXPONENT_BIAS]
-  baised_e - EXPONENT_BIAS
-end
-
 # Provides a decimal representation of v.
 # Returns true if it succeeds, otherwise the result cannot be trusted.
 # There will be *length digits inside the buffer (not null-terminated).
@@ -363,7 +291,7 @@ def grisu3(v : Float64, buffer_p) : {Bool, Int32, Int32}
   # closest floating-point neighbors. Any number strictly between
   # boundary_minus and boundary_plus will round to v when convert to a double.
   # Grisu3 will never output representations that lie exactly on a boundary.
-  boundaries = normalized_boundaries(v)
+  boundaries = IEEE.normalized_boundaries(v)
   assert boundaries[:plus].exp == w.exp
 
   ten_mk, mk = CachedPowers.get_cached_power_for_binary_exponent(w.exp)
@@ -421,7 +349,7 @@ struct Float64
   def fast_to_s(io : IO)
     buffer = StaticArray(UInt8, 128).new(0_u8)
     status, decimal_exponent, length = ::grisu3(self, buffer.to_unsafe)
-    point = decimal_exponent+length
+    point = decimal_exponent + length
     i = 0
     while i < length
       io << '.' if i == point
@@ -431,6 +359,6 @@ struct Float64
   end
 end
 
-#buff = Array(UInt8).new(16)
-#puts fast_dtoa(1.23, buff)
-#p buff
+# buff = Array(UInt8).new(16)
+# puts fast_dtoa(1.23, buff)
+# p buff
