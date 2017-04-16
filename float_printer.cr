@@ -29,21 +29,32 @@ module FloatPrinter
     status, decimal_exponent, length = Grisu3.grisu3(v, buffer.to_unsafe)
     point = decimal_exponent + length
 
-    digits_after_point = decimal_exponent < 0 ? -decimal_exponent : 0
-
-    # _str = String.new(buffer.to_unsafe); pp [v, _str, point, decimal_exponent, length, digits_after_point]
+    # _str = String.new(buffer.to_unsafe); pp [v, _str, point, decimal_exponent, length ]
 
     exp = point
-    point = 1 if point > 10 || point < -10
+    exp_mode = point > 15 || point < -3
+    point = 1 if exp_mode
 
     # add leading zero
     io.write_byte '0'.ord.to_u8 if point < 1
 
     i = 0
+
     # add integer part digits
-    while i < point
-      io.write_byte buffer[i]
-      i += 1
+    if decimal_exponent > 0 && !exp_mode
+      # whole number but not big enough to be exp form
+      while i < length
+        io.write_byte buffer[i]
+        i += 1
+      end
+      (point - length).times do
+        io.write_byte '0'.ord.to_u8
+      end
+    else
+      while i < point
+        io.write_byte buffer[i]
+        i += 1
+      end
     end
 
     io.write_byte '.'.ord.to_u8
@@ -60,7 +71,7 @@ module FloatPrinter
     end
 
     # print trailing 0 if whole number or exp notation of power of ten
-    if decimal_exponent == 0 || (exp != point && length == 1)
+    if (decimal_exponent >= 0 && !exp_mode) || (exp != point && length == 1)
       io.write_byte '0'.ord.to_u8
     end
 

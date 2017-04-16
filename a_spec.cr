@@ -255,13 +255,20 @@ describe "grisu3" do
   end
 end
 
+private def float_to_s(v)
+  String.build(22) do |buff|
+    FloatPrinter.fast_to_s(v, buff)
+  end
+end
+
 private def test_str(s, file = __FILE__, line = __LINE__)
   [s, "-#{s}"].each do |str|
-    result = String.build(22) do |buff|
-      FloatPrinter.fast_to_s(str.to_f64, buff)
-    end
-    result.should eq(str), file, line
+    test_pair str.to_f64, str, file, line
   end
+end
+
+private def test_pair(v : Float64, str, file = __FILE__, line = __LINE__)
+  float_to_s(v).should eq(str), file, line
 end
 
 describe "to_s" do
@@ -280,4 +287,16 @@ describe "to_s" do
   it { test_str "1.0e+234" }
   it { test_str "1.1e+234" }
   it { test_str "1.0e-234" }
+
+  it { test_pair 0.001, "0.001" }
+  it { test_pair 0.0001, "0.0001" }
+  it { test_pair 0.00001, "1.0e-5" }
+  it { test_pair 0.000001, "1.0e-6" }
+  it { test_pair -0.0001, "-0.0001" }
+  it { test_pair -0.00001, "-1.0e-5" }
+
+  it { test_pair 10.0, "10.0" }
+  it { test_pair 1100.0, "1100.0" }
+  it { test_pair 100000000000000.0, "100000000000000.0" }
+  it { test_pair 1000000000000000.0, "1.0e+15" }
 end
