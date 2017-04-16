@@ -15,6 +15,29 @@ module IEEE
   SIGNIFICAND_SIZE          =                     53 # float64
   EXPONENT_BIAS             = 0x3FF + PHYSICAL_SIGNIFICAND_SIZE
   DENORMAL_EXPONENT         = -EXPONENT_BIAS + 1
+  SIGN_MASK = 0x8000000000000000_u64
+  #INFINITY = 0x7FF0000000000000_u64
+  #NAN = 0x7FF8000000000000_u64
+
+  def to_d64(v : Float64)
+    d64 = (pointerof(v).as UInt64*).value
+  end
+
+  def sign(d64 : UInt64)
+    (d64 & SIGN_MASK) == 0 ? 1 : -1
+  end
+
+  def special?(d64 : UInt64)
+    (d64 & EXPONENT_MASK) == EXPONENT_MASK
+  end
+
+  def inf?(d64 : UInt64)
+    special?(d64) && (d64 & SIGNIFICAND_MASK == 0)
+  end
+
+  def nan?(d64 : UInt64)
+    special?(d64) && (d64 & SIGNIFICAND_MASK != 0)
+  end
 
   # Computes the two boundaries of v.
   # The bigger boundary (m_plus) is normalized. The lower boundary has the same
@@ -28,7 +51,7 @@ module IEEE
     m_plus = DiyFP.new((w.frac << 1) + 1, w.exp - 1).normalize
     # pp m_plus
 
-    u64 = (pointerof(v).as UInt64*).value
+    d64 = to_d64(v)
 
     # The boundary is closer if the significand is of the form f == 2^p-1 then
     # the lower boundary is closer.
@@ -38,13 +61,13 @@ module IEEE
     # The only exception is for the smallest normal: the largest denormal is
     # at the same distance as its successor.
     # Note: denormals have the same exponent as the smallest normals.
-    physical_significand_is_zero = (u64 & SIGNIFICAND_MASK) == 0
+    physical_significand_is_zero = (d64 & SIGNIFICAND_MASK) == 0
     # pp physical_significand_is_zero
 
-    lower_bound_closer = physical_significand_is_zero && (exponent(u64) != DENORMAL_EXPONENT)
-    calcualted_exp = exponent(u64)
+    lower_bound_closer = physical_significand_is_zero && (exponent(d64) != DENORMAL_EXPONENT)
+    calcualted_exp = exponent(d64)
     # pp calcualted_exp
-    calc_denormal = denormal?(u64)
+    calc_denormal = denormal?(d64)
     # pp calc_denormal
     # pp lower_bound_closer
     # pp w
@@ -60,7 +83,7 @@ module IEEE
   end
 
   def frac_and_exp(v : Float64)
-    d64 = (pointerof(v).as UInt64*).value
+    d64 = to_d64(v)
     assert (d64 & EXPONENT_MASK) != EXPONENT_MASK
 
     if (d64 & EXPONENT_MASK) == 0 # denormal float

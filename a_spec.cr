@@ -255,8 +255,28 @@ describe "grisu3" do
   end
 end
 
-describe "to_s" do
-  it "" do
-    123.456.fast_to_s.should eq "123.456"
+private def test_str(s, file = __FILE__, line = __LINE__)
+  [s, "-#{s}"].each do |str|
+    result = String.build(22) do |buff|
+      FloatPrinter.fast_to_s(str.to_f64, buff)
+    end
+    result.should eq(str), file, line
   end
+end
+
+describe "to_s" do
+  it { test_str "0.0" }
+
+  it { test_str "Infinity" }
+
+  it { test_str "NaN" }
+
+  it { test_str "0.01" }
+  it { test_str "0.1" }
+  it { test_str "1.0" }
+  it { test_str "1.2" }
+  it { test_str "123.456" }
+
+ # it { test_str "1.0e+234" }
+ # it { test_str "1.0e-234" }
 end
