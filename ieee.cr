@@ -15,9 +15,7 @@ module IEEE
   SIGNIFICAND_SIZE          =                     53 # float64
   EXPONENT_BIAS             = 0x3FF + PHYSICAL_SIGNIFICAND_SIZE
   DENORMAL_EXPONENT         = -EXPONENT_BIAS + 1
-  SIGN_MASK = 0x8000000000000000_u64
-  #INFINITY = 0x7FF0000000000000_u64
-  #NAN = 0x7FF8000000000000_u64
+  SIGN_MASK                 = 0x8000000000000000_u64
 
   def to_d64(v : Float64)
     d64 = (pointerof(v).as UInt64*).value

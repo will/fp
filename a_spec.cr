@@ -277,6 +277,7 @@ describe "to_s" do
   it { test_str "1.2" }
   it { test_str "123.456" }
 
- # it { test_str "1.0e+234" }
- # it { test_str "1.0e-234" }
+  it { test_str "1.0e+234" }
+  it { test_str "1.1e+234" }
+  it { test_str "1.0e-234" }
 end

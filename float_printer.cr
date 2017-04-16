@@ -2,11 +2,12 @@ require "./grisu3"
 
 module FloatPrinter
   extend self
+
   def fast_to_s(v : Float64, io : IO)
     d64 = IEEE.to_d64(v)
 
     if IEEE.sign(d64) < 0
-      io << '-'
+      io.write_byte '-'.ord.to_u8
       v = -v
     end
 
@@ -30,24 +31,26 @@ module FloatPrinter
 
     digits_after_point = decimal_exponent < 0 ? -decimal_exponent : 0
 
-    _str = String.new(buffer.to_unsafe); pp [v, _str, point, decimal_exponent, length, digits_after_point]
+    # _str = String.new(buffer.to_unsafe); pp [v, _str, point, decimal_exponent, length, digits_after_point]
+
+    exp = point
+    point = 1 if point > 10 || point < -10
 
     # add leading zero
-    io << '0' if point < 1
+    io.write_byte '0'.ord.to_u8 if point < 1
 
     i = 0
-
     # add integer part digits
     while i < point
       io.write_byte buffer[i]
       i += 1
     end
 
-    io << '.'
+    io.write_byte '.'.ord.to_u8
 
     # add leading zeros after point
     if point < 0
-      (-point).times { io << '0' }
+      (-point).times { io.write_byte '0'.ord.to_u8 }
     end
 
     # add fractional part digits
@@ -56,9 +59,16 @@ module FloatPrinter
       i += 1
     end
 
-    # whole number, print trailing 0
-    if decimal_exponent == 0
-      io << '0'
+    # print trailing 0 if whole number or exp notation of power of ten
+    if decimal_exponent == 0 || (exp != point && length == 1)
+      io.write_byte '0'.ord.to_u8
+    end
+
+    # exp notation
+    if exp != point
+      io.write_byte 'e'.ord.to_u8
+      io.write_byte '+'.ord.to_u8 if exp > 0
+      (exp - 1).to_s(io)
     end
   end
 end
