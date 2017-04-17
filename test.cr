@@ -14,6 +14,8 @@ def bench(num)
   puts
 end
 
+bench 5e-324
 bench 123.456
-bench -1.234678e-123
 bench 0.0
+bench Float64::INFINITY
+
