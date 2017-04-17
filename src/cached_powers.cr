@@ -1,4 +1,4 @@
-module CachedPowers
+module FloatPrinter::CachedPowers
   private macro assert(exp, file = __FILE__, line = __LINE__)
     {% if !flag?(:release) %}
       unless {{exp}}

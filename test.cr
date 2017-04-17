@@ -1,17 +1,19 @@
-require "./a"
+require "./src/float_printer"
 require "benchmark"
 
-NUM   = 123.456
 TIMES = (ARGV[0]? || 1_500_000).to_i
 
-pp 123.456.to_s
-pp 123.456.fast_to_s
-raise "not same" unless 123.456.to_s == 123.456.fast_to_s
-
-Benchmark.ips do |x|
-  x.report "stdlib" { TIMES.times { NUM.to_s } }
-  x.report "grisu3" { TIMES.times { NUM.fast_to_s } }
+def bench(num)
+  puts "stdlib: #{num.to_s}"
+  puts "grisu3: #{num.fast_to_s}"
+  Benchmark.ips do |x|
+    x.report "stdlib" { TIMES.times { num.to_s } }
+    x.report "grisu3" { TIMES.times { num.fast_to_s } }
+  end
+  puts
+  puts
 end
-# stdlib   1.04  (957.66ms) (± 3.40%)  1.72× slower
-# grisu3   1.79  (557.27ms) (± 3.65%)       fastest # => with new slice each time
-# grisu3   2.54  (393.32ms) (± 4.81%)       fastest # => with staticarray
+
+bench 123.456
+bench -1.234678e-123
+bench 0.0

@@ -2,18 +2,18 @@ require "./diy_fp"
 require "./ieee"
 require "./cached_powers"
 
-module Grisu3
+module FloatPrinter::Grisu3
   extend self
   # ported from
   # https://github.com/juj/MathGeoLib/blob/master/src/Math/grisu3.c
   # Apache license
   private macro assert(exp, file = __FILE__, line = __LINE__)
-  {% if !flag?(:release) %}
-    unless {{exp}}
-      raise "Assertion Failed #{{{file}}}:#{{{line}}}"
-    end
-  {% end %}
-end
+    {% if !flag?(:release) %}
+      unless {{exp}}
+        raise "Assertion Failed #{{{file}}}:#{{{line}}}"
+      end
+    {% end %}
+  end
 
   # Adjusts the last digit of the generated number, and screens out generated
   # solutions that may be inaccurate. A solution may be inaccurate if it is

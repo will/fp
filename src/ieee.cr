@@ -1,4 +1,4 @@
-module IEEE
+module FloatPrinter::IEEE
   extend self
   private macro assert(exp, file = __FILE__, line = __LINE__)
     {% if !flag?(:release) %}

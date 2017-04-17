@@ -1,6 +1,8 @@
+require "./ieee"
+
 # Do it yourself Floating Point
 # Does not support special NaN and Infinity
-struct DiyFP
+struct FloatPrinter::DiyFP
   private macro assert(exp, file = __FILE__, line = __LINE__)
     {% if !flag?(:release) %}
       unless {{exp}}
